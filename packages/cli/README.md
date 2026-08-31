@@ -27,7 +27,7 @@ The dashboard gives you:
 - **A live kanban board** — tasks move through columns automatically as AI works on them
 - **Task detail view** — see the generated spec, step-by-step progress, reviewer verdicts, and full execution log
 - **Dependency-aware scheduling** — declare dependencies between tasks or let the engine infer them; work starts in the right order automatically
-- **Auto-merge** — on by default; reviewed work squash-merges into your branch without you lifting a finger
+- **Manual merge by default** — reviewed work waits in "In Review" until you approve it; auto-merge is optional
 - **Parallel execution** — independent tasks run simultaneously in isolated git worktrees
 - **Self-sustaining board** — agents may spawn follow-up tasks as they work, which get triaged, scheduled, and executed like any other task; the board feeds itself
 
@@ -49,7 +49,7 @@ An executor agent works through the spec step by step in the worktree. At each s
 
 ### Merge
 
-When execution finishes and the reviewer signs off, the task moves to "in review." By default, the completed work is automatically squash-merged into your current branch with a clean commit. Worktrees can be cleaned up after merge or reused by the next task to keep build caches warm. You can disable auto-merge if you prefer to review and merge manually.
+When execution finishes and the reviewer signs off, the task moves to "in review." By default, it stays there until you approve the local squash merge. You can enable auto-merge in Settings if desired. Worktrees can be cleaned up after merge or reused by the next task to keep build caches warm.
 
 Tasks flow through: **Triage → Todo → In Progress → In Review → Done**.
 

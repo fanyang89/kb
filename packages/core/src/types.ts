@@ -159,7 +159,7 @@ export const DEFAULT_SETTINGS: Settings = {
   maxWorktrees: 4,
   pollIntervalMs: 15000,
   groupOverlappingFiles: false,
-  autoMerge: true,
+  autoMerge: false,
   worktreeInitCommand: undefined,
   recycleWorktrees: false,
   taskPrefix: undefined,

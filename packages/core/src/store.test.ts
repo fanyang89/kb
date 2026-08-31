@@ -317,6 +317,13 @@ describe("TaskStore", () => {
 
   // ── Settings tests ────────────────────────────────────────────────
 
+  describe("merge settings", () => {
+    it("requires manual merge by default", async () => {
+      const settings = await store.getSettings();
+      expect(settings.autoMerge).toBe(false);
+    });
+  });
+
   describe("model settings", () => {
     it("persists defaultProvider and defaultModelId and returns them via getSettings", async () => {
       await store.updateSettings({ defaultProvider: "anthropic", defaultModelId: "claude-sonnet-4-5" });
