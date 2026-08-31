@@ -53,19 +53,36 @@ export function isUsageLimitError(errorMessage: string): boolean {
 /**
  * Check if an agent session resolved with an error after exhausting retries.
  *
- * pi-coding-agent's `session.prompt()` does **not** throw when retries are
- * exhausted — it resolves normally and stores the error on `session.state.error`.
- * Call this immediately after every `await session.prompt(...)` to re-raise
- * the swallowed error so existing `catch` blocks (with `isUsageLimitError`
- * checks) can detect rate-limit conditions and trigger `UsageLimitPauser`.
+ * pi-coding-agent's `session.prompt()` does **not** always throw when retries
+ * are exhausted. In pi 0.84 the failure is exposed as `state.errorMessage`
+ * and on the final assistant message (`stopReason: "error"`). Re-raise it so
+ * existing error handling can detect usage limits and fail the task correctly.
  *
- * @param session — The agent session (or any object with `state.error?: string`)
- * @throws {Error} If `session.state.error` is set and non-empty
+ * The legacy `state.error` field remains supported for restored/mock sessions.
  */
-export function checkSessionError(session: { state: { error?: string } }): void {
-  const error = session.state?.error;
-  if (error) {
-    throw new Error(error);
+export function checkSessionError(session: {
+  state: {
+    errorMessage?: string;
+    error?: string;
+    messages?: Array<{
+      role?: string;
+      stopReason?: string;
+      errorMessage?: string;
+    }>;
+  };
+}): void {
+  const state = session.state;
+  const directError = state?.errorMessage ?? state?.error;
+  if (directError) {
+    throw new Error(directError);
+  }
+
+  const lastAssistantMessage = state?.messages
+    ?.slice()
+    .reverse()
+    .find((message) => message.role === "assistant");
+  if (lastAssistantMessage?.stopReason === "error") {
+    throw new Error(lastAssistantMessage.errorMessage ?? "Agent stopped with an error");
   }
 }
 

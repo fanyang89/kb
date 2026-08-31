@@ -2,8 +2,8 @@ import { exec } from "node:child_process";
 import type { AddressInfo } from "node:net";
 import { TaskStore } from "@kb/core";
 import { createServer } from "@kb/dashboard";
-import { TriageProcessor, TaskExecutor, Scheduler, AgentSemaphore, WorktreePool, aiMergeTask, UsageLimitPauser, PRIORITY_MERGE, scanIdleWorktrees, cleanupOrphanedWorktrees } from "@kb/engine";
-import { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
+import { TriageProcessor, TaskExecutor, Scheduler, AgentSemaphore, WorktreePool, aiMergeTask, UsageLimitPauser, PRIORITY_MERGE, scanIdleWorktrees, cleanupOrphanedWorktrees, configurePiSdkHttp } from "@kb/engine";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 function openBrowser(url: string): void {
   const cmd =
@@ -187,15 +187,13 @@ export async function runDashboard(port: number, opts: { open?: boolean } = {}) 
   });
 
   // ── Auth & model wiring ────────────────────────────────────────────
-  // AuthStorage manages OAuth/API-key credentials (stored in ~/.pi/agent/auth.json).
-  // ModelRegistry discovers available models from configured providers.
-  // Passing these to createServer enables the dashboard's Authentication
-  // tab (login/logout) and Model selector.
-  const authStorage = AuthStorage.create();
-  const modelRegistry = new ModelRegistry(authStorage);
+  // ModelRuntime is the canonical model/auth service in pi 0.84+.
+  // Mirror the pi CLI's proxy-aware HTTP setup before creating it.
+  configurePiSdkHttp();
+  const modelRuntime = await ModelRuntime.create();
 
-  // Start the web server with AI merge, auth, and model registry wired in
-  const app = createServer(store, { onMerge, authStorage, modelRegistry });
+  // Start the web server with AI merge and the model runtime wired in.
+  const app = createServer(store, { onMerge, modelRuntime });
 
   // Start the AI engine
   {

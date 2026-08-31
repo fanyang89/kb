@@ -76,7 +76,31 @@ describe("isUsageLimitError", () => {
 // ── checkSessionError tests ──────────────────────────────────────────
 
 describe("checkSessionError", () => {
-  it("throws when session.state.error is set", () => {
+  it("throws when pi 0.84 session.state.errorMessage is set", () => {
+    const session = { state: { errorMessage: "fetch failed" } };
+    expect(() => checkSessionError(session)).toThrow("fetch failed");
+  });
+
+  it("throws for a final assistant message with stopReason error", () => {
+    const session = {
+      state: {
+        messages: [
+          { role: "user" },
+          { role: "assistant", stopReason: "error", errorMessage: "provider unavailable" },
+        ],
+      },
+    };
+    expect(() => checkSessionError(session)).toThrow("provider unavailable");
+  });
+
+  it("uses a fallback when an error assistant message has no message", () => {
+    const session = {
+      state: { messages: [{ role: "assistant", stopReason: "error" }] },
+    };
+    expect(() => checkSessionError(session)).toThrow("Agent stopped with an error");
+  });
+
+  it("throws when legacy session.state.error is set", () => {
     const session = { state: { error: "rate_limit_error: Rate limit exceeded" } };
     expect(() => checkSessionError(session)).toThrow("rate_limit_error: Rate limit exceeded");
   });

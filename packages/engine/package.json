@@ -22,8 +22,9 @@
   },
   "dependencies": {
     "@kb/core": "workspace:*",
-    "@mariozechner/pi-ai": "^0.62.0",
-    "@mariozechner/pi-coding-agent": "^0.62.0"
+    "@earendil-works/pi-ai": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "undici": "^8.9.0"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

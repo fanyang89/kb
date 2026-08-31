@@ -23,12 +23,14 @@ function makeTask(id: string): Task {
     id,
     title: `Task ${id}`,
     column: "triage" as ColumnType,
-    status: undefined as any,
+    status: undefined,
     steps: [],
+    currentStep: 0,
     dependencies: [],
     description: "",
-    created: new Date().toISOString(),
-    updated: new Date().toISOString(),
+    log: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 }
 

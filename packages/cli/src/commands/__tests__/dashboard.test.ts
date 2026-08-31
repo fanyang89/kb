@@ -81,16 +81,14 @@ vi.mock("@kb/engine", async (importOriginal) => {
   };
 });
 
-// ── Mock @mariozechner/pi-coding-agent ──────────────────────────────
+// ── Mock @earendil-works/pi-coding-agent ────────────────────────────
 
-const mockAuthStorage = { getAuth: vi.fn(), setAuth: vi.fn() };
-const mockModelRegistry = { getModels: vi.fn().mockResolvedValue([]) };
+const mockModelRuntime = { getModels: vi.fn().mockReturnValue([]) };
 
-vi.mock("@mariozechner/pi-coding-agent", () => ({
-  AuthStorage: {
-    create: vi.fn(() => mockAuthStorage),
+vi.mock("@earendil-works/pi-coding-agent", () => ({
+  ModelRuntime: {
+    create: vi.fn().mockResolvedValue(mockModelRuntime),
   },
-  ModelRegistry: vi.fn().mockImplementation(() => mockModelRegistry),
 }));
 
 // ── Import module under test (after mocks) ──────────────────────────
@@ -99,38 +97,28 @@ const { runDashboard } = await import("../dashboard.js");
 
 // ── Tests ───────────────────────────────────────────────────────────
 
-describe("runDashboard — AuthStorage & ModelRegistry wiring", () => {
+describe("runDashboard — ModelRuntime wiring", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     const { TaskStore } = await import("@kb/core");
     (TaskStore as ReturnType<typeof vi.fn>).mockImplementation(() => makeMockStore());
   });
 
-  it("passes authStorage and modelRegistry to createServer", async () => {
+  it("passes ModelRuntime to createServer", async () => {
     const { createServer } = await import("@kb/dashboard");
 
     await runDashboard(0, { open: false });
 
     expect(createServer).toHaveBeenCalledTimes(1);
     const serverOpts = (createServer as ReturnType<typeof vi.fn>).mock.calls[0][1];
-    expect(serverOpts).toHaveProperty("authStorage", mockAuthStorage);
-    expect(serverOpts).toHaveProperty("modelRegistry", mockModelRegistry);
+    expect(serverOpts).toHaveProperty("modelRuntime", mockModelRuntime);
   });
 
-  it("creates AuthStorage via AuthStorage.create()", async () => {
-    const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
+  it("creates ModelRuntime through the pi 0.84 API", async () => {
+    const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
 
     await runDashboard(0, { open: false });
 
-    expect(AuthStorage.create).toHaveBeenCalledTimes(1);
-  });
-
-  it("creates ModelRegistry with the authStorage instance", async () => {
-    const { ModelRegistry } = await import("@mariozechner/pi-coding-agent");
-
-    await runDashboard(0, { open: false });
-
-    expect(ModelRegistry).toHaveBeenCalledTimes(1);
-    expect(ModelRegistry).toHaveBeenCalledWith(mockAuthStorage);
+    expect(ModelRuntime.create).toHaveBeenCalledTimes(1);
   });
 });

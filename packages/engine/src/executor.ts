@@ -4,10 +4,10 @@ import { existsSync } from "node:fs";
 import type { TaskStore, Task, TaskDetail, StepStatus, Settings } from "@kb/core";
 import { findWorktreeUser } from "./merger.js";
 import { generateWorktreeName } from "./worktree-names.js";
-import { Type, type Static } from "@mariozechner/pi-ai";
+import { Type, type Static } from "@earendil-works/pi-ai";
 import { createKbAgent } from "./pi.js";
 import { reviewStep, type ReviewVerdict } from "./reviewer.js";
-import type { ToolDefinition, AgentSession, SessionManager } from "@mariozechner/pi-coding-agent";
+import type { ToolDefinition, AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { PRIORITY_EXECUTE, type AgentSemaphore } from "./concurrency.js";
 import type { WorktreePool } from "./worktree-pool.js";
 import { AgentLogger } from "./agent-logger.js";
@@ -434,7 +434,7 @@ export class TaskExecutor {
 
           // Re-raise errors that pi-coding-agent swallowed after exhausting retries.
           // session.prompt() resolves normally even when retries are exhausted —
-          // the error is stored on session.state.error instead of being thrown.
+          // the error is stored on session.state.errorMessage instead of being thrown.
           checkSessionError(session);
 
           // If dependency was added during execution, discard worktree and move to triage

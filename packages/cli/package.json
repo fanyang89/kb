@@ -2,6 +2,9 @@
   "name": "@dustinbyrne/kb",
   "version": "0.4.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "keywords": [
     "pi-package"
   ],
@@ -34,24 +37,21 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@mariozechner/pi-ai": "^0.62.0",
-    "@mariozechner/pi-coding-agent": "^0.62.0",
+    "@earendil-works/pi-ai": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^0.84.4",
     "express": "^5.1.0",
-    "multer": "^2.1.1"
+    "multer": "^2.1.1",
+    "undici": "^8.9.0"
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "*",
-    "@sinclair/typebox": "*"
+    "@earendil-works/pi-ai": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^0.84.4"
   },
   "peerDependenciesMeta": {
-    "@mariozechner/pi-ai": {
+    "@earendil-works/pi-ai": {
       "optional": true
     },
-    "@mariozechner/pi-coding-agent": {
-      "optional": true
-    },
-    "@sinclair/typebox": {
+    "@earendil-works/pi-coding-agent": {
       "optional": true
     }
   },
@@ -59,7 +59,6 @@
     "@kb/core": "workspace:*",
     "@kb/dashboard": "workspace:*",
     "@kb/engine": "workspace:*",
-    "@sinclair/typebox": "^0.34.0",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",

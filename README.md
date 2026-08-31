@@ -1,6 +1,6 @@
 # kb
 
-AI-orchestrated task board. Like Trello, but your tasks get specified, executed, and delivered by AI — powered by [pi](https://github.com/badlogic/pi-mono).
+AI-orchestrated task board. Like Trello, but your tasks get specified, executed, and delivered by AI — powered by [pi](https://github.com/earendil-works/pi).
 
 ![kb dashboard](demo/screenshot.png)
 
@@ -71,9 +71,9 @@ Agents can use these same commands, or see [`.agents/skills/`](.agents/skills/) 
 
 ### Prerequisites
 
-The AI engine uses [pi](https://github.com/badlogic/pi-mono) under the hood:
+The AI engine uses [pi](https://github.com/earendil-works/pi) under the hood:
 
-1. `npm i -g @mariozechner/pi-coding-agent`
+1. `npm i -g @earendil-works/pi-coding-agent`
 2. Run `pi` and use `/login`, or set `ANTHROPIC_API_KEY`
 
 kb reuses your existing pi authentication.

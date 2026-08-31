@@ -66,7 +66,7 @@ Options:
 Columns: triage, todo, in-progress, in-review, done
 Supported file types: png, jpg, gif, webp, txt, log, json, yaml, yml, toml, csv, xml
 
-The AI engine uses pi (github.com/badlogic/pi-mono) for agent sessions.
+The AI engine uses pi (github.com/earendil-works/pi) for agent sessions.
 Requires configured API keys — run "pi" first to set up authentication.
 `.trim();
 

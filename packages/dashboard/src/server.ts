@@ -3,7 +3,7 @@ import { join, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { TaskStore, MergeResult } from "@kb/core";
-import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
+import type { ModelRuntimeLike } from "./routes.js";
 import { createApiRoutes } from "./routes.js";
 import { createSSE } from "./sse.js";
 import { rateLimit, RATE_LIMITS } from "./rate-limit.js";
@@ -15,10 +15,8 @@ export interface ServerOptions {
   onMerge?: (taskId: string) => Promise<MergeResult>;
   /** Maximum concurrent worktrees / execution slots (default 2) */
   maxConcurrent?: number;
-  /** Optional AuthStorage instance for auth routes — if not provided, one is created internally */
-  authStorage?: AuthStorageLike;
-  /** Optional ModelRegistry instance for the models API — if not provided, the endpoint returns an empty list */
-  modelRegistry?: ModelRegistryLike;
+  /** Optional ModelRuntime instance for model and auth APIs. */
+  modelRuntime?: ModelRuntimeLike;
 }
 
 export function createServer(store: TaskStore, options?: ServerOptions): ReturnType<typeof express> {

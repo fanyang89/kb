@@ -6,34 +6,45 @@ import { COLUMNS } from "@kb/core";
 import type { ServerOptions } from "./server.js";
 
 /**
- * Minimal interface matching pi-coding-agent's ModelRegistry API surface
- * used by the models route. Avoids a direct dependency on the pi-coding-agent package.
+ * Minimal interface matching pi-coding-agent 0.84's ModelRuntime API surface.
+ * Keeping this structural avoids a direct dashboard dependency on the SDK.
  */
-export interface ModelRegistryLike {
-  /** Reload models from disk to pick up changes. */
-  refresh(): void;
-  /** Get models that have auth configured. */
-  getAvailable(): Array<{ id: string; name: string; provider: string; reasoning: boolean; contextWindow: number }>;
-}
-
-/**
- * Minimal interface matching pi-coding-agent's AuthStorage API surface
- * used by the auth routes. Avoids a direct dependency on the pi-coding-agent package.
- */
-export interface AuthStorageLike {
-  reload(): void;
-  getOAuthProviders(): Array<{ id: string; name: string }>;
-  hasAuth(provider: string): boolean;
+export interface ModelRuntimeLike {
+  refresh(): Promise<unknown>;
+  getAvailable(): Promise<ReadonlyArray<{
+    id: string;
+    name: string;
+    provider: string;
+    reasoning: boolean;
+    contextWindow: number;
+  }>>;
+  getProviders(): ReadonlyArray<{
+    id: string;
+    name: string;
+    auth: { oauth?: unknown };
+  }>;
+  checkAuth(providerId: string): Promise<{ type: "api_key" | "oauth"; source?: string } | undefined>;
   login(
     providerId: string,
-    callbacks: {
-      onAuth: (info: { url: string; instructions?: string }) => void;
-      onPrompt: (prompt: { message: string; placeholder?: string; allowEmpty?: boolean }) => Promise<string>;
-      onProgress?: (message: string) => void;
+    type: "oauth",
+    interaction: {
       signal?: AbortSignal;
+      prompt(prompt: {
+        type: "text" | "secret" | "select" | "manual_code";
+        message: string;
+        placeholder?: string;
+        signal?: AbortSignal;
+        options?: ReadonlyArray<{ id: string }>;
+      }): Promise<string>;
+      notify(event:
+        | { type: "auth_url"; url: string; instructions?: string }
+        | { type: "device_code"; userCode: string; verificationUri: string }
+        | { type: "info"; message: string; links?: ReadonlyArray<{ url: string }> }
+        | { type: "progress"; message: string }
+      ): void;
     },
-  ): Promise<void>;
-  logout(provider: string): void;
+  ): Promise<unknown>;
+  logout(providerId: string): Promise<void>;
 }
 
 const upload = multer({
@@ -77,7 +88,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   });
 
   // Models
-  registerModelsRoute(router, options?.modelRegistry);
+  registerModelsRoute(router, options?.modelRuntime);
 
   // List all tasks
   router.get("/tasks", async (_req, res) => {
@@ -286,25 +297,26 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   });
 
   // ---------- Auth routes ----------
-  registerAuthRoutes(router, options?.authStorage);
+  registerAuthRoutes(router, options?.modelRuntime);
 
   return router;
 }
 
 /**
  * Register the GET /api/models route.
- * Returns available AI models from the ModelRegistry for the UI model selector.
- * If no ModelRegistry is provided, returns an empty array.
+ * Returns available AI models from ModelRuntime for the UI model selector.
+ * If no runtime is provided, returns an empty array.
  */
-function registerModelsRoute(router: Router, modelRegistry?: ModelRegistryLike): void {
-  router.get("/models", (_req, res) => {
+function registerModelsRoute(router: Router, modelRuntime?: ModelRuntimeLike): void {
+  router.get("/models", async (_req, res) => {
     try {
-      if (!modelRegistry) {
+      if (!modelRuntime) {
         res.json([]);
         return;
       }
-      modelRegistry.refresh();
-      const models = modelRegistry.getAvailable().map((m) => ({
+      await modelRuntime.refresh();
+      const available = await modelRuntime.getAvailable();
+      const models = available.map((m) => ({
         provider: m.provider,
         id: m.id,
         name: m.name,
@@ -318,19 +330,13 @@ function registerModelsRoute(router: Router, modelRegistry?: ModelRegistryLike):
   });
 }
 
-/**
- * Register authentication status, login, and logout routes.
- * Uses pi-coding-agent's AuthStorage for credential management.
- * If no AuthStorage is provided, creates one internally (reads from ~/.pi/agent/auth.json).
- */
-function registerAuthRoutes(router: Router, authStorage?: AuthStorageLike): void {
-  // Use injected AuthStorage or fail gracefully if not provided.
-  // When running via the CLI/engine, AuthStorage is passed in via ServerOptions.
-  function getAuthStorage(): AuthStorageLike {
-    if (!authStorage) {
+/** Register authentication status, login, and logout routes via ModelRuntime. */
+function registerAuthRoutes(router: Router, modelRuntime?: ModelRuntimeLike): void {
+  function getModelRuntime(): ModelRuntimeLike {
+    if (!modelRuntime) {
       throw new Error("Authentication is not configured");
     }
-    return authStorage;
+    return modelRuntime;
   }
 
   /**
@@ -344,16 +350,15 @@ function registerAuthRoutes(router: Router, authStorage?: AuthStorageLike): void
    * Returns list of OAuth providers with their authentication status.
    * Response: { providers: [{ id: string, name: string, authenticated: boolean }] }
    */
-  router.get("/auth/status", (_req, res) => {
+  router.get("/auth/status", async (_req, res) => {
     try {
-      const storage = getAuthStorage();
-      storage.reload();
-      const oauthProviders = storage.getOAuthProviders();
-      const providers = oauthProviders.map((p) => ({
-        id: p.id,
-        name: p.name,
-        authenticated: storage.hasAuth(p.id),
-      }));
+      const runtime = getModelRuntime();
+      const oauthProviders = runtime.getProviders().filter((provider) => provider.auth.oauth);
+      const providers = await Promise.all(oauthProviders.map(async (provider) => ({
+        id: provider.id,
+        name: provider.name,
+        authenticated: (await runtime.checkAuth(provider.id))?.type === "oauth",
+      })));
       res.json({ providers });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -367,7 +372,7 @@ function registerAuthRoutes(router: Router, authStorage?: AuthStorageLike): void
    * Response: { url: string, instructions?: string }
    *
    * The endpoint starts the OAuth flow and returns the auth URL from the
-   * onAuth callback. The client should open this URL in a new tab and
+   * ModelRuntime auth event. The client should open this URL in a new tab and
    * poll GET /api/auth/status to detect completion.
    */
   router.post("/auth/login", async (req, res) => {
@@ -384,9 +389,9 @@ function registerAuthRoutes(router: Router, authStorage?: AuthStorageLike): void
         return;
       }
 
-      const storage = getAuthStorage();
-      const oauthProviders = storage.getOAuthProviders();
-      const found = oauthProviders.find((p) => p.id === provider);
+      const runtime = getModelRuntime();
+      const oauthProviders = runtime.getProviders().filter((candidate) => candidate.auth.oauth);
+      const found = oauthProviders.find((candidate) => candidate.id === provider);
       if (!found) {
         res.status(400).json({ error: `Unknown provider: ${provider}` });
         return;
@@ -404,18 +409,40 @@ function registerAuthRoutes(router: Router, authStorage?: AuthStorageLike): void
         authReject = reject;
       });
 
-      // Start login flow in background — don't await the full login
-      const loginPromise = storage.login(provider, {
-        onAuth: (info) => {
-          authResolve({ url: info.url, instructions: info.instructions });
-        },
-        onPrompt: async (prompt) => {
-          // Web UI cannot interactively prompt — return empty string if allowed
-          if (prompt.allowEmpty) return "";
-          return prompt.placeholder || "";
-        },
-        onProgress: () => {}, // no-op for web UI
+      // Start login flow in background — don't await the full login.
+      const loginPromise = runtime.login(provider, "oauth", {
         signal: abortController.signal,
+        prompt: async (prompt) => {
+          if (prompt.type === "manual_code") {
+            // Callback-based OAuth providers race this prompt against their local
+            // callback server. Keep it pending so opening the browser can complete
+            // login; the provider aborts the prompt when the callback wins.
+            return new Promise<string>((resolve) => {
+              if (prompt.signal?.aborted) {
+                resolve("");
+                return;
+              }
+              prompt.signal?.addEventListener("abort", () => resolve(""), { once: true });
+            });
+          }
+
+          // The dashboard has no generic prompt UI. Select a provider default when
+          // available; API-key setup is not routed through this OAuth endpoint.
+          if (prompt.type === "select") return prompt.options?.[0]?.id ?? "";
+          return prompt.placeholder ?? "";
+        },
+        notify: (event) => {
+          if (event.type === "auth_url") {
+            authResolve({ url: event.url, instructions: event.instructions });
+          } else if (event.type === "device_code") {
+            authResolve({
+              url: event.verificationUri,
+              instructions: `Enter code ${event.userCode}`,
+            });
+          } else if (event.type === "info" && event.links?.[0]) {
+            authResolve({ url: event.links[0].url, instructions: event.message });
+          }
+        },
       });
 
       // Race: either we get the auth URL or the login completes/fails first
@@ -453,7 +480,7 @@ function registerAuthRoutes(router: Router, authStorage?: AuthStorageLike): void
    * Body: { provider: string }
    * Response: { success: true }
    */
-  router.post("/auth/logout", (req, res) => {
+  router.post("/auth/logout", async (req, res) => {
     try {
       const { provider } = req.body;
       if (!provider || typeof provider !== "string") {
@@ -461,8 +488,8 @@ function registerAuthRoutes(router: Router, authStorage?: AuthStorageLike): void
         return;
       }
 
-      const storage = getAuthStorage();
-      storage.logout(provider);
+      const runtime = getModelRuntime();
+      await runtime.logout(provider);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

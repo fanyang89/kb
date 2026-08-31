@@ -4,7 +4,7 @@ import http from "node:http";
 import { createApiRoutes } from "./routes.js";
 import type { TaskStore, TaskAttachment } from "@kb/core";
 import type { TaskDetail } from "@kb/core";
-import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
+import type { ModelRuntimeLike } from "./routes.js";
 
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {
@@ -378,15 +378,28 @@ describe("Attachment routes", () => {
 
 // --- Models route tests ---
 
-function createMockModelRegistry(overrides: Partial<ModelRegistryLike> = {}): ModelRegistryLike {
+function createMockModelRuntime(overrides: Partial<ModelRuntimeLike> = {}): ModelRuntimeLike {
   return {
-    refresh: vi.fn(),
-    getAvailable: vi.fn().mockReturnValue([
+    refresh: vi.fn().mockResolvedValue(undefined),
+    getAvailable: vi.fn().mockResolvedValue([
       { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "anthropic", reasoning: true, contextWindow: 200000 },
       { id: "gpt-4o", name: "GPT-4o", provider: "openai", reasoning: false, contextWindow: 128000 },
     ]),
+    getProviders: vi.fn().mockReturnValue([
+      { id: "anthropic", name: "Anthropic", auth: { oauth: {} } },
+    ]),
+    checkAuth: vi.fn().mockResolvedValue(undefined),
+    login: vi.fn().mockImplementation((_provider: string, _type: "oauth", interaction: any) => {
+      interaction.notify({
+        type: "auth_url",
+        url: "https://auth.example.com/login",
+        instructions: "Open in browser",
+      });
+      return Promise.resolve({});
+    }),
+    logout: vi.fn().mockResolvedValue(undefined),
     ...overrides,
-  };
+  } as ModelRuntimeLike;
 }
 
 describe("GET /models", () => {
@@ -396,92 +409,73 @@ describe("GET /models", () => {
     store = createMockStore();
   });
 
-  function buildApp(modelRegistry?: ModelRegistryLike) {
+  function buildApp(modelRuntime?: ModelRuntimeLike) {
     const app = express();
     app.use(express.json());
-    app.use("/api", createApiRoutes(store, { modelRegistry }));
+    app.use("/api", createApiRoutes(store, { modelRuntime }));
     return app;
   }
 
-  it("returns available models from registry", async () => {
-    const modelRegistry = createMockModelRegistry();
-    const res = await GET(buildApp(modelRegistry), "/api/models");
+  it("returns available models from the runtime", async () => {
+    const modelRuntime = createMockModelRuntime();
+    const res = await GET(buildApp(modelRuntime), "/api/models");
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([
       { provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: true, contextWindow: 200000 },
       { provider: "openai", id: "gpt-4o", name: "GPT-4o", reasoning: false, contextWindow: 128000 },
     ]);
-    expect(modelRegistry.refresh).toHaveBeenCalled();
+    expect(modelRuntime.refresh).toHaveBeenCalled();
   });
 
-  it("returns empty array when no model registry is provided", async () => {
+  it("returns empty array when no model runtime is provided", async () => {
     const res = await GET(buildApp(), "/api/models");
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
 
-  it("returns empty array when registry has no available models", async () => {
-    const modelRegistry = createMockModelRegistry({
-      getAvailable: vi.fn().mockReturnValue([]),
+  it("returns empty array when the runtime has no available models", async () => {
+    const modelRuntime = createMockModelRuntime({
+      getAvailable: vi.fn().mockResolvedValue([]),
     });
-    const res = await GET(buildApp(modelRegistry), "/api/models");
+    const res = await GET(buildApp(modelRuntime), "/api/models");
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
 
-  it("returns 500 when registry throws", async () => {
-    const modelRegistry = createMockModelRegistry({
-      getAvailable: vi.fn().mockImplementation(() => {
-        throw new Error("registry error");
-      }),
+  it("returns 500 when the runtime rejects", async () => {
+    const modelRuntime = createMockModelRuntime({
+      getAvailable: vi.fn().mockRejectedValue(new Error("runtime error")),
     });
-    const res = await GET(buildApp(modelRegistry), "/api/models");
+    const res = await GET(buildApp(modelRuntime), "/api/models");
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toBe("registry error");
+    expect(res.body.error).toBe("runtime error");
   });
 });
 
 // --- Auth route tests ---
 
-function createMockAuthStorage(overrides: Partial<AuthStorageLike> = {}): AuthStorageLike {
-  return {
-    reload: vi.fn(),
-    getOAuthProviders: vi.fn().mockReturnValue([
-      { id: "anthropic", name: "Anthropic" },
-    ]),
-    hasAuth: vi.fn().mockReturnValue(false),
-    login: vi.fn().mockImplementation((_provider: string, callbacks: any) => {
-      // Simulate onAuth callback with a URL, then resolve
-      callbacks.onAuth({ url: "https://auth.example.com/login", instructions: "Open in browser" });
-      return Promise.resolve();
-    }),
-    logout: vi.fn(),
-    ...overrides,
-  } as unknown as AuthStorageLike;
-}
-
 describe("GET /auth/status", () => {
   let store: TaskStore;
-  let authStorage: AuthStorageLike;
+  let modelRuntime: ModelRuntimeLike;
 
   beforeEach(() => {
     store = createMockStore();
-    authStorage = createMockAuthStorage();
+    modelRuntime = createMockModelRuntime();
   });
 
   function buildApp() {
     const app = express();
     app.use(express.json());
-    app.use("/api", createApiRoutes(store, { authStorage }));
+    app.use("/api", createApiRoutes(store, { modelRuntime }));
     return app;
   }
 
-  it("returns provider list with auth status", async () => {
-    (authStorage.hasAuth as ReturnType<typeof vi.fn>).mockReturnValue(true);
+  it("returns OAuth providers with auth status", async () => {
+    (modelRuntime.checkAuth as ReturnType<typeof vi.fn>).mockResolvedValue({ type: "oauth", source: "OAuth" });
 
     const res = await GET(buildApp(), "/api/auth/status");
 
@@ -489,43 +483,52 @@ describe("GET /auth/status", () => {
     expect(res.body.providers).toEqual([
       { id: "anthropic", name: "Anthropic", authenticated: true },
     ]);
-    expect(authStorage.reload).toHaveBeenCalled();
+    expect(modelRuntime.checkAuth).toHaveBeenCalledWith("anthropic");
   });
 
   it("returns unauthenticated status", async () => {
-    (authStorage.hasAuth as ReturnType<typeof vi.fn>).mockReturnValue(false);
-
     const res = await GET(buildApp(), "/api/auth/status");
 
     expect(res.status).toBe(200);
     expect(res.body.providers[0].authenticated).toBe(false);
   });
 
+  it("excludes providers without OAuth", async () => {
+    (modelRuntime.getProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+      { id: "openai", name: "OpenAI", auth: { apiKey: {} } },
+    ]);
+
+    const res = await GET(buildApp(), "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    expect(res.body.providers).toEqual([]);
+  });
+
   it("returns 500 on error", async () => {
-    (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      throw new Error("storage error");
+    (modelRuntime.getProviders as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error("runtime error");
     });
 
     const res = await GET(buildApp(), "/api/auth/status");
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toBe("storage error");
+    expect(res.body.error).toBe("runtime error");
   });
 });
 
 describe("POST /auth/login", () => {
   let store: TaskStore;
-  let authStorage: AuthStorageLike;
+  let modelRuntime: ModelRuntimeLike;
 
   beforeEach(() => {
     store = createMockStore();
-    authStorage = createMockAuthStorage();
+    modelRuntime = createMockModelRuntime();
   });
 
   function buildApp() {
     const app = express();
     app.use(express.json());
-    app.use("/api", createApiRoutes(store, { authStorage }));
+    app.use("/api", createApiRoutes(store, { modelRuntime }));
     return app;
   }
 
@@ -557,10 +560,78 @@ describe("POST /auth/login", () => {
     expect(res.body.error).toContain("Unknown provider");
   });
 
-  it("returns 500 when login fails", async () => {
-    (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation((_provider: string, callbacks: any) => {
-      return Promise.reject(new Error("OAuth failed"));
+  it("calls ModelRuntime.login with OAuth", async () => {
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "anthropic" }), {
+      "Content-Type": "application/json",
     });
+
+    expect(res.status).toBe(200);
+    expect(modelRuntime.login).toHaveBeenCalledWith(
+      "anthropic",
+      "oauth",
+      expect.objectContaining({ prompt: expect.any(Function), notify: expect.any(Function) }),
+    );
+  });
+
+  it("keeps callback OAuth manual-code prompts pending until aborted", async () => {
+    const promptAbort = new AbortController();
+    let promptSettled = false;
+
+    (modelRuntime.login as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_provider: string, _type: "oauth", interaction: any) => {
+        interaction.notify({
+          type: "auth_url",
+          url: "https://auth.example.com/callback-login",
+        });
+        const value = await interaction.prompt({
+          type: "manual_code",
+          message: "Complete login in your browser",
+          placeholder: "http://localhost/callback",
+          signal: promptAbort.signal,
+        });
+        promptSettled = true;
+        return { value };
+      },
+    );
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "anthropic" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.url).toBe("https://auth.example.com/callback-login");
+    await Promise.resolve();
+    expect(promptSettled).toBe(false);
+
+    promptAbort.abort();
+    await vi.waitFor(() => expect(promptSettled).toBe(true));
+  });
+
+  it("returns a device-code login URL", async () => {
+    (modelRuntime.login as ReturnType<typeof vi.fn>).mockImplementation(
+      (_provider: string, _type: "oauth", interaction: any) => {
+        interaction.notify({
+          type: "device_code",
+          userCode: "ABCD-EFGH",
+          verificationUri: "https://auth.example.com/device",
+        });
+        return Promise.resolve({});
+      },
+    );
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "anthropic" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      url: "https://auth.example.com/device",
+      instructions: "Enter code ABCD-EFGH",
+    });
+  });
+
+  it("returns 500 when login fails", async () => {
+    (modelRuntime.login as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("OAuth failed"));
 
     const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "anthropic" }), {
       "Content-Type": "application/json",
@@ -573,17 +644,17 @@ describe("POST /auth/login", () => {
 
 describe("POST /auth/logout", () => {
   let store: TaskStore;
-  let authStorage: AuthStorageLike;
+  let modelRuntime: ModelRuntimeLike;
 
   beforeEach(() => {
     store = createMockStore();
-    authStorage = createMockAuthStorage();
+    modelRuntime = createMockModelRuntime();
   });
 
   function buildApp() {
     const app = express();
     app.use(express.json());
-    app.use("/api", createApiRoutes(store, { authStorage }));
+    app.use("/api", createApiRoutes(store, { modelRuntime }));
     return app;
   }
 
@@ -594,7 +665,7 @@ describe("POST /auth/logout", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(authStorage.logout).toHaveBeenCalledWith("anthropic");
+    expect(modelRuntime.logout).toHaveBeenCalledWith("anthropic");
   });
 
   it("returns 400 when provider is missing", async () => {
@@ -607,9 +678,7 @@ describe("POST /auth/logout", () => {
   });
 
   it("returns 500 on error", async () => {
-    (authStorage.logout as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      throw new Error("logout failed");
-    });
+    (modelRuntime.logout as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("logout failed"));
 
     const res = await REQUEST(buildApp(), "POST", "/api/auth/logout", JSON.stringify({ provider: "anthropic" }), {
       "Content-Type": "application/json",

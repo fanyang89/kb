@@ -5,12 +5,12 @@ import type {
   TaskAttachment,
   Settings,
 } from "@kb/core";
-import type { ImageContent } from "@mariozechner/pi-ai";
-import { Type, type Static } from "@mariozechner/pi-ai";
+import type { ImageContent } from "@earendil-works/pi-ai";
+import { Type, type Static } from "@earendil-works/pi-ai";
 import type {
   ToolDefinition,
   AgentSession,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { createKbAgent } from "./pi.js";
 import { reviewStep, type ReviewVerdict } from "./reviewer.js";
 import { PRIORITY_SPECIFY, type AgentSemaphore } from "./concurrency.js";

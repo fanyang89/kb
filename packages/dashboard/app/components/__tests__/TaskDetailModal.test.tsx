@@ -492,9 +492,9 @@ describe("TaskDetailModal", () => {
       <TaskDetailModal
         task={makeTask({
           log: [
-            { timestamp: "2026-01-01T00:00:00Z", message: "Created task" },
-            { timestamp: "2026-01-01T00:01:00Z", message: "Started work" },
-            { timestamp: "2026-01-01T00:02:00Z", message: "Completed step 1" },
+            { timestamp: "2026-01-01T00:00:00Z", action: "Created task" },
+            { timestamp: "2026-01-01T00:01:00Z", action: "Started work" },
+            { timestamp: "2026-01-01T00:02:00Z", action: "Completed step 1" },
           ],
         })}
         onClose={noop}

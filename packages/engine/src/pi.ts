@@ -5,21 +5,92 @@
  * Provides factory functions for creating triage and executor agent sessions.
  */
 
+import { EventEmitter } from "node:events";
+import * as undici from "undici";
 import {
-  AuthStorage,
   createAgentSession,
-  createCodingTools,
-  createReadOnlyTools,
   DefaultResourceLoader,
-  ModelRegistry,
+  getAgentDir,
+  initTheme,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
   type AgentSession,
   type ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 export interface AgentResult {
   session: AgentSession;
+}
+
+const originalGlobalFetch = globalThis.fetch;
+let installedGlobalFetch: typeof globalThis.fetch | undefined;
+let httpDispatcherConfigured = false;
+const ignoreUndiciDispatcherError = (_error: Error): void => {};
+
+function withUndiciErrorListener<T>(dispatcher: T): T {
+  if (dispatcher instanceof EventEmitter) {
+    EventEmitter.prototype.on.call(dispatcher, "error", ignoreUndiciDispatcherError);
+  }
+  return dispatcher;
+}
+
+function createUndiciClient(origin: string | URL, options: object): undici.Dispatcher {
+  return withUndiciErrorListener(
+    new undici.Client(origin, options as undici.Client.Options),
+  );
+}
+
+function createUndiciOriginDispatcher(origin: string | URL, options: object): undici.Dispatcher {
+  const dispatcherOptions = options as undici.Pool.Options & { connections?: number };
+  if (dispatcherOptions.connections === 1) {
+    return createUndiciClient(origin, dispatcherOptions);
+  }
+  return withUndiciErrorListener(new undici.Pool(origin, {
+    ...dispatcherOptions,
+    factory: createUndiciClient,
+  }));
+}
+
+/**
+ * Match the pi CLI's Node startup behavior for SDK consumers. Node fetch does
+ * not honor HTTP(S)_PROXY by itself, so install undici's environment-aware,
+ * crash-safe dispatcher before ModelRuntime performs network operations.
+ */
+export function configurePiSdkHttp(): void {
+  if (httpDispatcherConfigured) return;
+
+  const dispatcher = withUndiciErrorListener(new undici.EnvHttpProxyAgent({
+    allowH2: false,
+    bodyTimeout: 300_000,
+    connect: { autoSelectFamilyAttemptTimeout: 2_000 },
+    headersTimeout: 300_000,
+    clientFactory: createUndiciClient,
+    factory: createUndiciOriginDispatcher,
+  }));
+  undici.setGlobalDispatcher(dispatcher);
+
+  // Keep fetch and the dispatcher on the same undici implementation without
+  // overwriting a deliberate fetch replacement installed by the host app.
+  const shouldInstallGlobals = installedGlobalFetch === undefined
+    ? globalThis.fetch === originalGlobalFetch
+    : globalThis.fetch === installedGlobalFetch;
+  if (shouldInstallGlobals) {
+    undici.install?.();
+    installedGlobalFetch = globalThis.fetch;
+  }
+
+  httpDispatcherConfigured = true;
+}
+
+export function getAgentToolNames(
+  permission: AgentOptions["tools"],
+  customTools: ToolDefinition[] = [],
+): string[] {
+  const builtInTools = permission === "readonly"
+    ? ["read", "grep", "find", "ls"]
+    : ["read", "bash", "edit", "write"];
+  return [...builtInTools, ...customTools.map((tool) => tool.name)];
 }
 
 export interface AgentOptions {
@@ -44,36 +115,50 @@ export interface AgentOptions {
  * Reuses the user's existing pi auth and model configuration.
  */
 export async function createKbAgent(options: AgentOptions): Promise<AgentResult> {
-  const authStorage = AuthStorage.create();
-  const modelRegistry = new ModelRegistry(authStorage);
+  configurePiSdkHttp();
+  const modelRuntime = await ModelRuntime.create();
 
-  const tools =
-    options.tools === "readonly"
-      ? createReadOnlyTools(options.cwd)
-      : createCodingTools(options.cwd);
+  // An explicit pi 0.84 tool allowlist applies to custom tools too, so include
+  // their names or task/reporting tools such as review_spec will be disabled.
+  const tools = getAgentToolNames(options.tools, options.customTools);
 
   const settingsManager = SettingsManager.inMemory({
     compaction: { enabled: true },
     retry: { enabled: true, maxRetries: 3 },
   });
 
+  // Built-in tools format output through the shared theme proxy. The pi CLI
+  // initializes it during startup, but SDK consumers must do so explicitly.
+  initTheme(settingsManager.getTheme(), false);
+
   // Resolve explicit model selection if provider and model ID are specified
   const selectedModel = options.defaultProvider && options.defaultModelId
-    ? modelRegistry.find(options.defaultProvider, options.defaultModelId)
+    ? modelRuntime.getModel(options.defaultProvider, options.defaultModelId)
     : undefined;
+
+  if (options.defaultProvider && options.defaultModelId && !selectedModel) {
+    throw new Error(
+      `Model not found: ${options.defaultProvider}/${options.defaultModelId}. ` +
+        "Run 'pi --list-models' to see available models.",
+    );
+  }
 
   const resourceLoader = new DefaultResourceLoader({
     cwd: options.cwd,
+    agentDir: getAgentDir(),
     settingsManager,
     systemPromptOverride: () => options.systemPrompt,
     appendSystemPromptOverride: () => [],
+    additionalExtensionPaths: [],
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
   });
   await resourceLoader.reload();
 
   const { session } = await createAgentSession({
     cwd: options.cwd,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     resourceLoader,
     tools,
     customTools: options.customTools,

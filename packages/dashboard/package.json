@@ -19,7 +19,8 @@
     "build": "vite build && tsc",
     "build:client": "vite build",
     "dev": "vite build --watch",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.app.json"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.app.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@kb/core": "workspace:*",
